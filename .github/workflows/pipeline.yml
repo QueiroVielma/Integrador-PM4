@@ -1,0 +1,159 @@
+name: Pipeline PM-04 (Terraform + Ansible)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - "ansible/**"
+      - ".github/workflows/pipeline.yml"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Evita duas execucoes mexendo na infraestrutura ao mesmo tempo
+concurrency:
+  group: infra-pm04
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-2
+  TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+
+jobs:
+  terraform:
+    name: Provisionar (Terraform)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform
+    outputs:
+      app_id: ${{ steps.saidas.outputs.app_id }}
+      db_id: ${{ steps.saidas.outputs.db_id }}
+      db_ip: ${{ steps.saidas.outputs.db_ip }}
+      alb_url: ${{ steps.saidas.outputs.alb_url }}
+
+    steps:
+      - name: Baixar o codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar credenciais da AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }} # so precisa no AWS Academy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Instalar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.17.2"
+          terraform_wrapper: false
+
+      - name: Terraform fmt (padrao de formatacao)
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init
+        run: terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform plan
+        run: terraform plan -input=false -out=tfplan
+
+      - name: Terraform apply
+        if: github.event_name != 'pull_request'
+        run: terraform apply -input=false -auto-approve tfplan
+
+      - name: Ler as saidas do Terraform
+        id: saidas
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "app_id=$(terraform output -raw app_instance_id)" >> "$GITHUB_OUTPUT"
+          echo "db_id=$(terraform output -raw db_instance_id)" >> "$GITHUB_OUTPUT"
+          echo "db_ip=$(terraform output -raw db_private_ip)" >> "$GITHUB_OUTPUT"
+          echo "alb_url=$(terraform output -raw alb_url)" >> "$GITHUB_OUTPUT"
+
+  ansible:
+    name: Configurar (Ansible)
+    needs: terraform
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ansible
+
+    steps:
+      - name: Baixar o codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar credenciais da AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Instalar Session Manager Plugin (acesso as VMs privadas)
+        run: |
+          curl -sSLo /tmp/ssm.deb "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb"
+          sudo dpkg -i /tmp/ssm.deb
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar Ansible e as colecoes
+        run: |
+          pip install "ansible-core>=2.17,<2.19"
+          ansible-galaxy collection install -r requirements.yml
+
+      - name: Gravar a chave SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/pm04
+          chmod 600 ~/.ssh/pm04
+
+      - name: Gerar inventario com as saidas do Terraform
+        run: |
+          cat > inventory.ini <<EOF
+          [app]
+          ${{ needs.terraform.outputs.app_id }}
+
+          [db]
+          ${{ needs.terraform.outputs.db_id }}
+
+          [all:vars]
+          ansible_user=ubuntu
+          ansible_ssh_private_key_file=~/.ssh/pm04
+          ansible_ssh_common_args=-o StrictHostKeyChecking=no -o ProxyCommand="aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p"
+          db_host=${{ needs.terraform.outputs.db_ip }}
+          EOF
+          cat inventory.ini
+
+      - name: Rodar o playbook
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_ROOT_PASSWORD: ${{ secrets.DB_ROOT_PASSWORD }}
+        run: ansible-playbook site.yml
+
+      - name: Teste final pelo load balancer (evidencia)
+        run: |
+          URL="${{ needs.terraform.outputs.alb_url }}"
+          echo "Testando $URL"
+          for i in $(seq 1 20); do
+            CODIGO=$(curl -s -o /dev/null -w "%{http_code}" "$URL" || true)
+            echo "Tentativa $i: HTTP $CODIGO"
+            if [ "$CODIGO" -ge 200 ] && [ "$CODIGO" -lt 400 ]; then
+              echo "Aplicacao no ar em $URL"
+              echo "### Aplicacao no ar: $URL" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "A aplicacao nao respondeu pelo load balancer"
+          exit 1

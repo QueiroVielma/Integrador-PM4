@@ -1,0 +1,28 @@
+---
+- name: Criar pasta para os dados do MySQL (os dados ficam na VM, fora do container)
+  ansible.builtin.file:
+    path: /opt/mysql/data
+    state: directory
+    mode: "0755"
+
+- name: Subir o container do MySQL
+  community.docker.docker_container:
+    name: mysql
+    image: "{{ mysql_image }}"
+    state: started
+    restart_policy: always
+    published_ports:
+      - "3306:3306"
+    volumes:
+      - /opt/mysql/data:/var/lib/mysql
+    env:
+      MYSQL_ROOT_PASSWORD: "{{ db_root_password }}"
+      MYSQL_DATABASE: "{{ db_name }}"
+      MYSQL_USER: "{{ db_user }}"
+      MYSQL_PASSWORD: "{{ db_password }}"
+  no_log: true   # nao mostrar as senhas no log da pipeline
+
+- name: Esperar o MySQL responder na porta 3306
+  ansible.builtin.wait_for:
+    port: 3306
+    timeout: 180

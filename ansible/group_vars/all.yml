@@ -1,0 +1,19 @@
+# Imagens com tag fixa (sem "latest"), para o deploy ser reproduzivel.
+# Para atualizar a aplicacao: troque a tag aqui, faca commit e a pipeline aplica.
+mysql_image: "mysql:8.4.3"
+app_image: "nginx:1.27.3-alpine"   # TROCAR pela imagem da aplicacao escolhida
+
+# Porta que o container da aplicacao escuta e porta exposta na VM
+# (a porta da VM tem que ser a mesma do app_port do Terraform)
+app_container_port: 80
+app_host_port: 80
+health_check_path: "/"
+
+# Banco de dados
+db_name: "appdb"
+db_user: "appuser"
+
+# Senhas NAO ficam no codigo: a pipeline le dos GitHub Secrets
+# e passa como variavel de ambiente
+db_password: "{{ lookup('ansible.builtin.env', 'DB_PASSWORD') }}"
+db_root_password: "{{ lookup('ansible.builtin.env', 'DB_ROOT_PASSWORD') }}"

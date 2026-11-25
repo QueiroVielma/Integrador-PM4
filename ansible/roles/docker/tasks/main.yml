@@ -1,0 +1,28 @@
+---
+- name: Esperar o cloud-init terminar (evita conflito com o apt da primeira inicializacao)
+  ansible.builtin.command: cloud-init status --wait
+  register: cloud_init
+  changed_when: false
+  failed_when: cloud_init.rc not in [0, 2]
+
+- name: Instalar Docker e a biblioteca Python do Docker
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - python3-docker
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    lock_timeout: 300
+
+- name: Garantir que o Docker esta rodando e inicia com a VM
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Colocar o usuario ubuntu no grupo docker
+  ansible.builtin.user:
+    name: ubuntu
+    groups: docker
+    append: true

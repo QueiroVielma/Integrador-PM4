@@ -1,0 +1,17 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+tfplan
+crash.log
+
+# Ansible (o inventario de verdade e gerado pela pipeline)
+ansible/inventory.ini
+*.retry
+
+# Chaves e credenciais nunca vao para o Git
+*.pem
+*.key
+pm04
+pm04.pub
+.env

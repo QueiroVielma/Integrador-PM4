@@ -1,0 +1,46 @@
+name: Destruir infraestrutura PM-04
+
+# So roda manualmente (aba Actions > Run workflow), para nao gastar credito a toa
+on:
+  workflow_dispatch:
+    inputs:
+      confirmacao:
+        description: 'Digite DESTRUIR para confirmar'
+        required: true
+
+concurrency:
+  group: infra-pm04
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-2
+  TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+
+jobs:
+  destroy:
+    if: github.event.inputs.confirmacao == 'DESTRUIR'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.17.2"
+          terraform_wrapper: false
+
+      - name: Terraform init
+        run: terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+
+      - name: Terraform destroy
+        run: terraform destroy -input=false -auto-approve

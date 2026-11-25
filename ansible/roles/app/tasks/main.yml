@@ -1,0 +1,36 @@
+---
+- name: Testar se a VM da aplicacao alcanca o banco na porta 3306
+  ansible.builtin.wait_for:
+    host: "{{ db_host }}"
+    port: 3306
+    timeout: 120
+
+- name: Subir o container da aplicacao
+  community.docker.docker_container:
+    name: app
+    image: "{{ app_image }}"
+    state: started
+    restart_policy: always
+    published_ports:
+      - "{{ app_host_port }}:{{ app_container_port }}"
+    # Variaveis de conexao com o banco. Ajuste os nomes conforme a aplicacao
+    # (as SPRING_* ja funcionam para aplicacoes Spring Boot)
+    env:
+      DB_HOST: "{{ db_host }}"
+      DB_PORT: "3306"
+      DB_NAME: "{{ db_name }}"
+      DB_USER: "{{ db_user }}"
+      DB_PASSWORD: "{{ db_password }}"
+      SPRING_DATASOURCE_URL: "jdbc:mysql://{{ db_host }}:3306/{{ db_name }}"
+      SPRING_DATASOURCE_USERNAME: "{{ db_user }}"
+      SPRING_DATASOURCE_PASSWORD: "{{ db_password }}"
+  no_log: true
+
+- name: Verificar se a aplicacao responde dentro da VM
+  ansible.builtin.uri:
+    url: "http://localhost:{{ app_host_port }}{{ health_check_path }}"
+    status_code: [200, 301, 302]
+  register: resposta
+  until: resposta.status in [200, 301, 302]
+  retries: 12
+  delay: 10

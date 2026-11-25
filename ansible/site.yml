@@ -1,0 +1,29 @@
+---
+# Playbook principal: configura as duas VMs
+
+- name: Preparar todas as VMs
+  hosts: all
+  become: true
+  gather_facts: false
+  pre_tasks:
+    - name: Esperar a VM ficar acessivel (o SSM demora alguns minutos depois de criar)
+      ansible.builtin.wait_for_connection:
+        delay: 10
+        timeout: 600
+
+    - name: Coletar informacoes da VM
+      ansible.builtin.setup:
+  roles:
+    - docker
+
+- name: Configurar o banco de dados
+  hosts: db
+  become: true
+  roles:
+    - database
+
+- name: Configurar a aplicacao
+  hosts: app
+  become: true
+  roles:
+    - app

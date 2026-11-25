@@ -1,0 +1,78 @@
+# Load balancer: unico recurso aberto para a internet
+resource "aws_security_group" "alb" {
+  name        = "${var.project_name}-sg-alb"
+  description = "HTTP publico no load balancer"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    description = "HTTP da internet"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "${var.project_name}-sg-alb"
+  }
+}
+
+# VM da aplicacao: so recebe trafego vindo do load balancer
+# Obs: nao tem porta 22 aberta, o acesso do Ansible e pelo Session Manager
+resource "aws_security_group" "app" {
+  name        = "${var.project_name}-sg-app"
+  description = "Aplicacao acessivel somente pelo ALB"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    description     = "Trafego do load balancer"
+    from_port       = var.app_port
+    to_port         = var.app_port
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "${var.project_name}-sg-app"
+  }
+}
+
+# VM do banco: so a VM da aplicacao acessa o MySQL
+resource "aws_security_group" "db" {
+  name        = "${var.project_name}-sg-db"
+  description = "MySQL acessivel somente pela aplicacao"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    description     = "MySQL vindo da aplicacao"
+    from_port       = 3306
+    to_port         = 3306
+    protocol        = "tcp"
+    security_groups = [aws_security_group.app.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "${var.project_name}-sg-db"
+  }
+}
