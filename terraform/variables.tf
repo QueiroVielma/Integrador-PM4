@@ -68,9 +68,3 @@ variable "instance_profile_name" {
   type        = string
   default     = ""
 }
-
-variable "habilitar_https" {
-  description = "Cria o CloudFront na frente do ALB para ter URL HTTPS (exigencia REQ-05 do escopo)"
-  type        = bool
-  default     = true
-}

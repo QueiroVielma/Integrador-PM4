@@ -8,9 +8,6 @@ db_instance_type  = "t3.small"
 app_port          = 80
 health_check_path = "/health" # a API so responde 200 se estiver conectada no MongoDB
 
-# URL HTTPS pelo CloudFront (sem precisar comprar dominio)
-habilitar_https = true
-
 # Se estiver usando AWS Academy (Learner Lab), descomente a linha abaixo,
 # porque o laboratorio nao deixa criar roles IAM
 # instance_profile_name = "LabInstanceProfile"

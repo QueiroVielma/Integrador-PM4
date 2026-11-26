@@ -11,10 +11,8 @@ Implantação do **ToDo App** (demanda "Feira de Profissões",
 
 ```
               Visitantes (navegador)
-                      │ HTTPS
+                      │ HTTP (endereço do ALB: http://pm04-alb-xxxx.us-east-2.elb.amazonaws.com)
                       ▼
-            CloudFront (https://xxxx.cloudfront.net)
-                      │ HTTP
    ┌──────── VPC 10.0.0.0/16 ──────────────────────────────────┐
    │  Sub-redes PUBLICAS (10.0.1.0/24 e 10.0.2.0/24)            │
    │     ┌─────────────────────┐        ┌──────────────┐        │
@@ -36,7 +34,7 @@ Implantação do **ToDo App** (demanda "Feira de Profissões",
 | REQ-02 Rede privada | VMs sem IP público; porta 27017 liberada só para o security group da VM app |
 | REQ-03 Acessos | sem porta 22: Ansible usa SSH dentro do Session Manager; usuário `todo` próprio no banco; senhas em GitHub Secrets |
 | REQ-04 Persistência | dados em `/opt/mongo/data` na VM (fora do container); backup diário às 03:00 com 7 dias de retenção; teste de restauração em banco isolado |
-| REQ-05 Publicação | CloudFront dá URL HTTPS sem precisar comprar domínio; `/todos` e a interface no mesmo endereço |
+| REQ-05 Publicação | por enquanto HTTP pelo endereço do ALB; o domínio com HTTPS será configurado com o domínio cedido pelo professor. `/todos` e a interface ficam no mesmo endereço |
 | REQ-06 Disponibilidade | `restart: always` nos containers; `/health` só responde 200 se a API estiver conectada ao banco (usado pelo ALB, pelo Docker e pela pipeline) |
 
 ## Estrutura do repositório
@@ -51,7 +49,7 @@ app/                      -> código do ToDo App (adaptado para a nuvem)
   operacao.yml            -> saúde, logs, reiniciar, backup, testar restauração, limpar lista
   destroy.yml             -> derruba tudo (manual, pede para digitar DESTRUIR)
 terraform/
-  network.tf security.tf iam.tf compute.tf alb.tf cloudfront.tf outputs.tf
+  network.tf security.tf iam.tf compute.tf alb.tf outputs.tf
 ansible/
   site.yml                -> deploy completo
   operacao.yml            -> rotinas do dia a dia
@@ -90,9 +88,9 @@ O token do registry de imagens (`GITHUB_TOKEN`) é criado automaticamente pelo G
 O push na `main` roda tudo sozinho. Também dá para rodar manualmente em **Actions > Pipeline PM-04 > Run workflow**.
 
 1. **Construir imagens**: `docker build` da API e do frontend, publicadas em `ghcr.io/<usuario>/todo-*:<sha do commit>`.
-2. **Provisionar (Terraform)**: fmt, validate, plan e apply. Na primeira vez leva uns 10 min por causa do NAT, do ALB e do CloudFront.
+2. **Provisionar (Terraform)**: fmt, validate, plan e apply. Na primeira vez leva uns 10 min por causa do NAT e do ALB.
 3. **Configurar e implantar (Ansible)**: instala o Docker, sobe o MongoDB, faz um backup antes de atualizar e sobe a nova versão da aplicação.
-4. **Teste final**: chama `https://.../health` e `/todos`. A URL e a versão aparecem no resumo da execução.
+4. **Teste final**: chama `http://.../health` e `/todos`. A URL e a versão aparecem no resumo da execução.
 
 Pull Request para a `main` roda só build, fmt, validate e plan, sem aplicar nada.
 
@@ -127,7 +125,6 @@ sudo docker exec -i mongo sh -c 'mongorestore -u root -p "$MONGO_INITDB_ROOT_PAS
 
 - Isso apaga as VMs, **inclusive o banco e os backups**. Se quiser guardar a lista, rode antes a ação `backup` e copie o arquivo.
 - Continuam existindo, e cobrando centavos: o bucket do state (`pm04-tfstate-2026`) e as imagens no ghcr.io (gratuito).
-- O CloudFront demora alguns minutos para ser desativado, então o destroy é mais lento que o apply.
 
 ### Rodar localmente
 
@@ -143,7 +140,7 @@ docker compose up --build -d   # abrir http://localhost
 | ACE-01/06 | print da pipeline verde (3 jobs) com a versão no resumo |
 | ACE-02 | console EC2 mostrando as 2 VMs sem IP público |
 | ACE-03 | security group do db (27017 só do sg-app) e `curl`/`nc` externo falhando |
-| ACE-04 | celular abrindo a URL HTTPS: cadastrar, concluir, reabrir, excluir, recarregar |
+| ACE-04 | celular abrindo a URL da aplicação: cadastrar, concluir, reabrir, excluir, recarregar |
 | ACE-05 | criar tarefa, rodar `reiniciar`, rodar a pipeline de novo: a tarefa continua lá |
 | ACE-07 | log das ações `backup` e `testar-restauracao` |
 | ACE-08 | log das ações `saude` e `logs`; segredos aparecem como `***` |
@@ -153,8 +150,6 @@ docker compose up --build -d   # abrir http://localhost
 | Sintoma | Causa provável |
 |---|---|
 | `terraform fmt -check` falhou | rode `terraform fmt -recursive` e faça commit |
-| Erro de permissão no CloudFront | o usuário IAM precisa de permissão no CloudFront (ou `AdministratorAccess`) |
-| Conta nova sem permissão para CloudFront | coloque `habilitar_https = false` no tfvars (fica só HTTP pelo ALB) |
 | Ansible fica esperando a conexão | a VM ainda não registrou no SSM; espere até 10 min (Systems Manager > Fleet Manager) |
 | Target group *unhealthy* | a API não conecta no banco: rode a ação `logs` |
 | `denied` ao baixar a imagem | rode a pipeline completa (o login no ghcr.io usa o token da própria execução) |

@@ -1,10 +1,5 @@
 output "app_url" {
-  description = "Endereco publico da aplicacao (HTTPS pelo CloudFront)"
-  value       = var.habilitar_https ? "https://${aws_cloudfront_distribution.app[0].domain_name}" : "http://${aws_lb.app.dns_name}"
-}
-
-output "alb_url" {
-  description = "Endereco do load balancer (HTTP, origem do CloudFront)"
+  description = "Endereco publico da aplicacao (HTTP pelo load balancer; dominio com HTTPS sera adicionado depois)"
   value       = "http://${aws_lb.app.dns_name}"
 }
 
