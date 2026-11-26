@@ -1,28 +1,95 @@
 ---
-- name: Criar pasta para os dados do MySQL (os dados ficam na VM, fora do container)
-  ansible.builtin.file:
-    path: /opt/mysql/data
-    state: directory
-    mode: "0755"
+- name: Conferir se os secrets das senhas foram cadastrados
+  ansible.builtin.assert:
+    that:
+      - db_password | length > 0
+      - db_root_password | length > 0
+    fail_msg: "Cadastre os secrets DB_PASSWORD e DB_ROOT_PASSWORD no GitHub"
+  no_log: true
 
-- name: Subir o container do MySQL
+- name: Criar pastas do MongoDB (dados ficam na VM, fora do container)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "999" # usuario "mongodb" dentro do container
+    group: "999"
+    mode: "0700"
+  loop:
+    - "{{ mongo_data_dir }}"
+    - /opt/mongo/init
+
+- name: Criar pasta de backups
+  ansible.builtin.file:
+    path: "{{ mongo_backup_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+# So roda na PRIMEIRA vez (pasta de dados vazia): cria o usuario da aplicacao
+# e as tarefas de demonstracao. Depois disso o Mongo ignora esse script,
+# entao um novo deploy nunca apaga as tarefas.
+- name: Script de inicializacao do banco
+  ansible.builtin.template:
+    src: init-todo.js.j2
+    dest: /opt/mongo/init/01-init-todo.js
+    owner: "999"
+    group: "999"
+    mode: "0600"
+  no_log: true
+
+- name: Subir o container do MongoDB (com autenticacao)
   community.docker.docker_container:
-    name: mysql
-    image: "{{ mysql_image }}"
+    name: mongo
+    image: "{{ mongo_image }}"
     state: started
     restart_policy: always
     published_ports:
-      - "3306:3306"
+      - "{{ db_port }}:27017" # o security group so libera essa porta para a VM da aplicacao
     volumes:
-      - /opt/mysql/data:/var/lib/mysql
+      - "{{ mongo_data_dir }}:/data/db"
+      - /opt/mongo/init:/docker-entrypoint-initdb.d:ro
     env:
-      MYSQL_ROOT_PASSWORD: "{{ db_root_password }}"
-      MYSQL_DATABASE: "{{ db_name }}"
-      MYSQL_USER: "{{ db_user }}"
-      MYSQL_PASSWORD: "{{ db_password }}"
-  no_log: true   # nao mostrar as senhas no log da pipeline
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: "{{ db_root_password }}"
+      MONGO_INITDB_DATABASE: "{{ db_name }}"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  no_log: true # nao mostrar as senhas no log da pipeline
 
-- name: Esperar o MySQL responder na porta 3306
+- name: Esperar o MongoDB responder na porta {{ db_port }}
   ansible.builtin.wait_for:
-    port: 3306
+    port: "{{ db_port }}"
     timeout: 180
+
+- name: Instalar os scripts de operacao (backup, teste de restauracao, limpar lista)
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    mode: "0700"
+  loop:
+    - mongo-backup.sh
+    - mongo-testar-restauracao.sh
+    - mongo-limpar-lista.sh
+
+- name: Backup automatico todo dia as 03:00
+  ansible.builtin.cron:
+    name: backup do mongodb
+    minute: "0"
+    hour: "3"
+    job: "BACKUP_RETENCAO_DIAS={{ backup_retencao_dias }} /usr/local/bin/mongo-backup.sh >> /var/log/mongo-backup.log 2>&1"
+
+- name: Fazer um backup agora (antes de qualquer atualizacao da aplicacao)
+  ansible.builtin.command: /usr/local/bin/mongo-backup.sh
+  register: backup
+  retries: 5
+  delay: 10
+  until: backup.rc == 0
+  changed_when: true
+
+- name: Resultado do backup
+  ansible.builtin.debug:
+    msg: "{{ backup.stdout_lines }}"

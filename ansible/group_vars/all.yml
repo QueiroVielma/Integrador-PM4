@@ -1,17 +1,25 @@
 # Imagens com tag fixa (sem "latest"), para o deploy ser reproduzivel.
-# Para atualizar a aplicacao: troque a tag aqui, faca commit e a pipeline aplica.
-mysql_image: "mysql:8.4.3"
-app_image: "nginx:1.27.3-alpine"   # TROCAR pela imagem da aplicacao escolhida
+mongo_image: "mongo:8.0.4"
 
-# Porta que o container da aplicacao escuta e porta exposta na VM
-# (a porta da VM tem que ser a mesma do app_port do Terraform)
-app_container_port: 80
-app_host_port: 80
-health_check_path: "/"
+# Imagens da aplicacao: construidas pela pipeline e publicadas no GitHub (ghcr.io).
+# A tag e o commit do Git, entao cada versao implantada e identificavel.
+# A pipeline passa esses valores por variavel de ambiente.
+image_prefix: "{{ lookup('ansible.builtin.env', 'IMAGE_PREFIX') }}"
+app_version: "{{ lookup('ansible.builtin.env', 'APP_VERSION') }}"
+backend_image: "{{ image_prefix }}/todo-backend:{{ app_version }}"
+frontend_image: "{{ image_prefix }}/todo-frontend:{{ app_version }}"
+
+# Login no registry so durante o deploy (token temporario da pipeline)
+registry_user: "{{ lookup('ansible.builtin.env', 'REGISTRY_USER') }}"
+registry_token: "{{ lookup('ansible.builtin.env', 'REGISTRY_TOKEN') }}"
 
 # Banco de dados
-db_name: "appdb"
-db_user: "appuser"
+db_port: 27017
+db_name: "todo-app"
+db_user: "todo"             # usuario proprio da aplicacao (nao usa o root)
+mongo_data_dir: /opt/mongo/data
+mongo_backup_dir: /opt/mongo/backups
+backup_retencao_dias: 7
 
 # Senhas NAO ficam no codigo: a pipeline le dos GitHub Secrets
 # e passa como variavel de ambiente

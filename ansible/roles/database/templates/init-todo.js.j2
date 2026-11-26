@@ -1,0 +1,17 @@
+// Gerado pelo Ansible. Roda so na primeira inicializacao do MongoDB.
+db = db.getSiblingDB({{ db_name | to_json }});
+
+// Usuario proprio da aplicacao, so com leitura/escrita no banco dela
+db.createUser({
+  user: {{ db_user | to_json }},
+  pwd: {{ db_password | to_json }},
+  roles: [{ role: "readWrite", db: {{ db_name | to_json }} }],
+});
+
+// Tarefas de demonstracao (mesmas do projeto original)
+db.createCollection("todos");
+db.todos.insertMany([
+  { text: "Laércio é um excelente professor", completed: false },
+  { text: "Estudar Cloud", completed: true },
+  { text: "Fazer exercícios da UA", completed: false },
+]);

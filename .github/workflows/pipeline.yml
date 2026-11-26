@@ -4,23 +4,80 @@ on:
   push:
     branches: [main]
     paths:
+      - "app/**"
       - "terraform/**"
       - "ansible/**"
       - ".github/workflows/pipeline.yml"
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      versao:
+        description: "Voltar para uma versao anterior: cole o SHA do commit (vazio = versao atual)"
+        required: false
+        default: ""
 
 # Evita duas execucoes mexendo na infraestrutura ao mesmo tempo
 concurrency:
   group: infra-pm04
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  packages: write # publicar/baixar as imagens no ghcr.io
+
 env:
   AWS_REGION: us-east-2
   TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
+  # Versao implantada = commit do Git (ou a versao escolhida no rollback)
+  APP_VERSION: ${{ inputs.versao || github.sha }}
 
 jobs:
+  build:
+    name: Construir imagens (Docker)
+    # No rollback as imagens ja existem, nao precisa construir de novo
+    if: ${{ !inputs.versao }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar o codigo
+        uses: actions/checkout@v4
+
+      - name: Nome das imagens (o ghcr.io exige letras minusculas)
+        run: echo "PREFIXO=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      - name: Validar a sintaxe da API
+        run: node --check app/backend/index.js
+
+      - name: Construir imagem da API
+        run: >
+          docker build -t "$PREFIXO/todo-backend:$APP_VERSION"
+          --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}"
+          app/backend
+
+      - name: Construir imagem do frontend
+        run: >
+          docker build -t "$PREFIXO/todo-frontend:$APP_VERSION"
+          --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}"
+          app/frontend
+
+      - name: Login no GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publicar as imagens
+        if: github.event_name != 'pull_request'
+        run: |
+          docker push "$PREFIXO/todo-backend:$APP_VERSION"
+          docker push "$PREFIXO/todo-frontend:$APP_VERSION"
+          echo "### Imagens publicadas (versao $APP_VERSION)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- $PREFIXO/todo-backend:$APP_VERSION" >> "$GITHUB_STEP_SUMMARY"
+          echo "- $PREFIXO/todo-frontend:$APP_VERSION" >> "$GITHUB_STEP_SUMMARY"
+
   terraform:
     name: Provisionar (Terraform)
     runs-on: ubuntu-latest
@@ -31,7 +88,7 @@ jobs:
       app_id: ${{ steps.saidas.outputs.app_id }}
       db_id: ${{ steps.saidas.outputs.db_id }}
       db_ip: ${{ steps.saidas.outputs.db_ip }}
-      alb_url: ${{ steps.saidas.outputs.alb_url }}
+      app_url: ${{ steps.saidas.outputs.app_url }}
 
     steps:
       - name: Baixar o codigo
@@ -74,12 +131,16 @@ jobs:
           echo "app_id=$(terraform output -raw app_instance_id)" >> "$GITHUB_OUTPUT"
           echo "db_id=$(terraform output -raw db_instance_id)" >> "$GITHUB_OUTPUT"
           echo "db_ip=$(terraform output -raw db_private_ip)" >> "$GITHUB_OUTPUT"
-          echo "alb_url=$(terraform output -raw alb_url)" >> "$GITHUB_OUTPUT"
+          echo "app_url=$(terraform output -raw app_url)" >> "$GITHUB_OUTPUT"
 
   ansible:
-    name: Configurar (Ansible)
-    needs: terraform
-    if: github.event_name != 'pull_request'
+    name: Configurar e implantar (Ansible)
+    needs: [build, terraform]
+    # Roda tambem quando o build foi pulado (rollback para versao anterior)
+    if: >-
+      !cancelled() && github.event_name != 'pull_request' &&
+      needs.terraform.result == 'success' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped')
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -119,41 +180,40 @@ jobs:
           chmod 600 ~/.ssh/pm04
 
       - name: Gerar inventario com as saidas do Terraform
-        run: |
-          cat > inventory.ini <<EOF
-          [app]
-          ${{ needs.terraform.outputs.app_id }}
-
-          [db]
-          ${{ needs.terraform.outputs.db_id }}
-
-          [all:vars]
-          ansible_user=ubuntu
-          ansible_ssh_private_key_file=~/.ssh/pm04
-          ansible_ssh_common_args=-o StrictHostKeyChecking=no -o ProxyCommand="aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p"
-          db_host=${{ needs.terraform.outputs.db_ip }}
-          EOF
-          cat inventory.ini
+        run: >
+          sh gerar-inventario.sh
+          "${{ needs.terraform.outputs.app_id }}"
+          "${{ needs.terraform.outputs.db_id }}"
+          "${{ needs.terraform.outputs.db_ip }}"
 
       - name: Rodar o playbook
         env:
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_ROOT_PASSWORD: ${{ secrets.DB_ROOT_PASSWORD }}
-        run: ansible-playbook site.yml
-
-      - name: Teste final pelo load balancer (evidencia)
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          URL="${{ needs.terraform.outputs.alb_url }}"
+          export IMAGE_PREFIX="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          ansible-playbook site.yml
+
+      - name: Teste final pela URL publica (evidencia)
+        run: |
+          URL="${{ needs.terraform.outputs.app_url }}"
           echo "Testando $URL"
-          for i in $(seq 1 20); do
-            CODIGO=$(curl -s -o /dev/null -w "%{http_code}" "$URL" || true)
-            echo "Tentativa $i: HTTP $CODIGO"
-            if [ "$CODIGO" -ge 200 ] && [ "$CODIGO" -lt 400 ]; then
-              echo "Aplicacao no ar em $URL"
-              echo "### Aplicacao no ar: $URL" >> "$GITHUB_STEP_SUMMARY"
+          for i in $(seq 1 30); do
+            CODIGO=$(curl -s -o /tmp/saude.json -w "%{http_code}" "$URL/health" || true)
+            echo "Tentativa $i: /health -> HTTP $CODIGO"
+            if [ "$CODIGO" = "200" ]; then
+              echo "Saude: $(cat /tmp/saude.json)"
+              echo "Tarefas: $(curl -s "$URL/todos" | head -c 300)"
+              {
+                echo "### Aplicacao no ar: $URL"
+                echo "- Versao: \`$APP_VERSION\`"
+                echo "- Saude: \`$(cat /tmp/saude.json)\`"
+              } >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
-            sleep 15
+            sleep 20
           done
-          echo "A aplicacao nao respondeu pelo load balancer"
+          echo "A aplicacao nao respondeu pela URL publica"
           exit 1

@@ -1,0 +1,47 @@
+# Execucao LOCAL (desenvolvimento). Na nuvem quem sobe os containers e o Ansible.
+# Uso: cd app; docker compose up --build -d; abrir http://localhost
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "80:80"
+    networks:
+      - todo-net
+    depends_on:
+      - backend
+
+  backend:
+    build:
+      context: ./backend
+    networks:
+      - todo-net
+    environment:
+      - MONGO_HOST=mongo-todo
+      - MONGO_DB=todo-app
+      - MONGO_USER=root
+      - MONGO_PASSWORD=rootpassword # senha so de desenvolvimento local
+      - MONGO_AUTH_SOURCE=admin
+    depends_on:
+      - mongo
+
+  mongo:
+    build:
+      context: ./banco-de-dados
+    container_name: mongo-todo
+    networks:
+      - todo-net
+    volumes:
+      - mongo-dados:/data/db
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=rootpassword
+      - MONGO_INITDB_DATABASE=todo-app
+
+volumes:
+  mongo-dados:
+
+networks:
+  todo-net:
+    driver: bridge

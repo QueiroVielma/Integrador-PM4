@@ -53,9 +53,9 @@ variable "app_port" {
 }
 
 variable "health_check_path" {
-  description = "Caminho que o load balancer usa para saber se a aplicacao esta no ar"
+  description = "Caminho que o load balancer usa para saber se a aplicacao (e o banco) estao no ar"
   type        = string
-  default     = "/"
+  default     = "/health"
 }
 
 variable "ssh_public_key" {
@@ -67,4 +67,10 @@ variable "instance_profile_name" {
   description = "Instance profile ja existente (ex: LabInstanceProfile no AWS Academy). Vazio = o Terraform cria um"
   type        = string
   default     = ""
+}
+
+variable "habilitar_https" {
+  description = "Cria o CloudFront na frente do ALB para ter URL HTTPS (exigencia REQ-05 do escopo)"
+  type        = bool
+  default     = true
 }

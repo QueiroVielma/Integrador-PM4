@@ -51,16 +51,16 @@ resource "aws_security_group" "app" {
   }
 }
 
-# VM do banco: so a VM da aplicacao acessa o MySQL
+# VM do banco: so a VM da aplicacao acessa o MongoDB (nunca a internet)
 resource "aws_security_group" "db" {
   name        = "${var.project_name}-sg-db"
-  description = "MySQL acessivel somente pela aplicacao"
+  description = "MongoDB acessivel somente pela aplicacao"
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    description     = "MySQL vindo da aplicacao"
-    from_port       = 3306
-    to_port         = 3306
+    description     = "MongoDB vindo da aplicacao"
+    from_port       = 27017
+    to_port         = 27017
     protocol        = "tcp"
     security_groups = [aws_security_group.app.id]
   }

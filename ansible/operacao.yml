@@ -1,0 +1,98 @@
+---
+# Rotinas de operacao para os alunos (workflow "Operacao" no GitHub Actions).
+# Uso: ansible-playbook operacao.yml -e acao=<acao>
+#   saude               -> estado dos containers e da API
+#   logs                -> ultimas linhas de log de cada servico
+#   reiniciar           -> reinicia os containers (nao apaga dados)
+#   backup              -> faz um backup agora
+#   testar-restauracao  -> backup + restauracao em banco isolado
+#   limpar-lista        -> backup + lista nova para a apresentacao
+
+- name: Conferir a acao pedida
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Acao valida?
+      ansible.builtin.assert:
+        that: acao in ['saude', 'logs', 'reiniciar', 'backup', 'testar-restauracao', 'limpar-lista']
+        fail_msg: "Acao invalida: {{ acao | default('nenhuma') }}"
+
+- name: Operacao na VM do banco
+  hosts: db
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Containers do banco
+      ansible.builtin.command: docker ps -a --format "table {{ '{{' }}.Names{{ '}}' }}\t{{ '{{' }}.Image{{ '}}' }}\t{{ '{{' }}.Status{{ '}}' }}"
+      register: ps_db
+      changed_when: false
+      when: acao in ['saude', 'reiniciar']
+
+    - name: Reiniciar o MongoDB (os dados ficam no disco da VM)
+      ansible.builtin.command: docker restart mongo
+      when: acao == 'reiniciar'
+
+    - name: Esperar o MongoDB voltar
+      ansible.builtin.wait_for:
+        port: 27017
+        timeout: 120
+      when: acao == 'reiniciar'
+
+    - name: Logs do MongoDB
+      ansible.builtin.command: docker logs --tail 30 mongo
+      register: logs_db
+      changed_when: false
+      when: acao == 'logs'
+
+    - name: Rodar o script da acao
+      ansible.builtin.command: "{{ scripts[acao] }}"
+      vars:
+        scripts:
+          backup: /usr/local/bin/mongo-backup.sh
+          testar-restauracao: sh -c "/usr/local/bin/mongo-backup.sh && /usr/local/bin/mongo-testar-restauracao.sh"
+          limpar-lista: /usr/local/bin/mongo-limpar-lista.sh
+      register: script
+      when: acao in ['backup', 'testar-restauracao', 'limpar-lista']
+
+    - name: Resultado (banco)
+      ansible.builtin.debug:
+        msg: "{{ (ps_db.stdout_lines | default([])) + (logs_db.stdout_lines | default([])) + (logs_db.stderr_lines | default([])) + (script.stdout_lines | default([])) }}"
+
+- name: Operacao na VM da aplicacao
+  hosts: app
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Reiniciar API e frontend
+      ansible.builtin.command: docker restart backend frontend
+      when: acao == 'reiniciar'
+
+    - name: Containers da aplicacao
+      ansible.builtin.command: docker ps -a --format "table {{ '{{' }}.Names{{ '}}' }}\t{{ '{{' }}.Image{{ '}}' }}\t{{ '{{' }}.Status{{ '}}' }}"
+      register: ps_app
+      changed_when: false
+      when: acao in ['saude', 'reiniciar']
+
+    - name: Saude da API (inclui a conexao com o banco)
+      ansible.builtin.uri:
+        url: http://localhost/health
+        return_content: true
+        status_code: [200, 503]
+      register: saude
+      until: saude.status == 200
+      retries: 12
+      delay: 5
+      failed_when: false
+      when: acao in ['saude', 'reiniciar']
+
+    - name: Logs da API e do Nginx
+      ansible.builtin.shell: |
+        echo "===== backend ====="; docker logs --tail 30 backend 2>&1
+        echo "===== frontend ====="; docker logs --tail 30 frontend 2>&1
+      register: logs_app
+      changed_when: false
+      when: acao == 'logs'
+
+    - name: Resultado (aplicacao)
+      ansible.builtin.debug:
+        msg: "{{ (ps_app.stdout_lines | default([])) + (logs_app.stdout_lines | default([])) + ([('Saude: HTTP ' ~ saude.status ~ ' ' ~ (saude.content | default('')))] if saude.status is defined else []) }}"

@@ -50,7 +50,7 @@ resource "aws_instance" "db" {
   associate_public_ip_address = false
 
   root_block_device {
-    volume_size           = 10
+    volume_size           = 20
     volume_type           = "gp3"
     encrypted             = true
     delete_on_termination = true

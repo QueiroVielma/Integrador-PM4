@@ -1,0 +1,77 @@
+name: Operacao (saude, logs, reinicio, backup)
+
+# Rotinas do dia a dia para os alunos, sem mexer na infraestrutura.
+# Aba Actions > Operacao > Run workflow > escolher a acao.
+on:
+  workflow_dispatch:
+    inputs:
+      acao:
+        description: "O que fazer"
+        required: true
+        type: choice
+        options:
+          - saude
+          - logs
+          - reiniciar
+          - backup
+          - testar-restauracao
+          - limpar-lista
+
+concurrency:
+  group: infra-pm04
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-2
+
+jobs:
+  operacao:
+    name: "Acao: ${{ inputs.acao }}"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar o codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar credenciais da AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Instalar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.17.2"
+          terraform_wrapper: false
+
+      - name: Ler os IDs das VMs no state do Terraform
+        working-directory: terraform
+        run: |
+          terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+          echo "APP_ID=$(terraform output -raw app_instance_id)" >> "$GITHUB_ENV"
+          echo "DB_ID=$(terraform output -raw db_instance_id)" >> "$GITHUB_ENV"
+          echo "DB_IP=$(terraform output -raw db_private_ip)" >> "$GITHUB_ENV"
+
+      - name: Instalar Session Manager Plugin e Ansible
+        run: |
+          curl -sSLo /tmp/ssm.deb "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb"
+          sudo dpkg -i /tmp/ssm.deb
+          pip install "ansible-core>=2.17,<2.19"
+
+      - name: Gravar a chave SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/pm04
+          chmod 600 ~/.ssh/pm04
+
+      - name: Executar a acao
+        working-directory: ansible
+        run: |
+          sh gerar-inventario.sh "$APP_ID" "$DB_ID" "$DB_IP"
+          ansible-playbook operacao.yml -e acao=${{ inputs.acao }}
