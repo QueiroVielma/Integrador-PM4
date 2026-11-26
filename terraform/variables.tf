@@ -68,3 +68,13 @@ variable "instance_profile_name" {
   type        = string
   default     = ""
 }
+
+variable "zona_dns" {
+  description = "Zona do Route 53 (criada uma vez, com os nameservers cadastrados no Registro.br)"
+  type        = string
+}
+
+variable "dominio_app" {
+  description = "Endereco da aplicacao com HTTPS"
+  type        = string
+}

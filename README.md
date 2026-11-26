@@ -11,7 +11,8 @@ Implantação do **ToDo App** (demanda "Feira de Profissões",
 
 ```
               Visitantes (navegador)
-                      │ HTTP (endereço do ALB: http://pm04-alb-xxxx.us-east-2.elb.amazonaws.com)
+                      │ HTTPS  https://todo.martinazzo.dev.br
+                      │ (Route 53 aponta o domínio para o ALB; certificado gratuito do ACM)
                       ▼
    ┌──────── VPC 10.0.0.0/16 ──────────────────────────────────┐
    │  Sub-redes PUBLICAS (10.0.1.0/24 e 10.0.2.0/24)            │
@@ -34,7 +35,7 @@ Implantação do **ToDo App** (demanda "Feira de Profissões",
 | REQ-02 Rede privada | VMs sem IP público; porta 27017 liberada só para o security group da VM app |
 | REQ-03 Acessos | sem porta 22: Ansible usa SSH dentro do Session Manager; usuário `todo` próprio no banco; senhas em GitHub Secrets |
 | REQ-04 Persistência | dados em `/opt/mongo/data` na VM (fora do container); backup diário às 03:00 com 7 dias de retenção; teste de restauração em banco isolado |
-| REQ-05 Publicação | por enquanto HTTP pelo endereço do ALB; o domínio com HTTPS será configurado com o domínio cedido pelo professor. `/todos` e a interface ficam no mesmo endereço |
+| REQ-05 Publicação | domínio próprio `todo.martinazzo.dev.br` com HTTPS (certificado ACM no ALB); quem entra por HTTP é redirecionado para HTTPS; `/todos` e a interface no mesmo endereço |
 | REQ-06 Disponibilidade | `restart: always` nos containers; `/health` só responde 200 se a API estiver conectada ao banco (usado pelo ALB, pelo Docker e pela pipeline) |
 
 ## Estrutura do repositório
@@ -49,7 +50,7 @@ app/                      -> código do ToDo App (adaptado para a nuvem)
   operacao.yml            -> saúde, logs, reiniciar, backup, testar restauração, limpar lista
   destroy.yml             -> derruba tudo (manual, pede para digitar DESTRUIR)
 terraform/
-  network.tf security.tf iam.tf compute.tf alb.tf outputs.tf
+  network.tf security.tf iam.tf compute.tf alb.tf dns.tf outputs.tf
 ansible/
   site.yml                -> deploy completo
   operacao.yml            -> rotinas do dia a dia
@@ -65,6 +66,28 @@ ansible/
 - O CORS aberto foi removido, porque frontend e API ficam no mesmo endereço.
 - Foi criada a rota `/health`, e a API tenta reconectar se o banco ainda não estiver pronto.
 - As imagens agora têm tag fixa (`node:20.18.1-alpine`, `nginx:1.27.3-alpine`, `mongo:8.0.4`) e o build usa `npm ci`.
+
+## Domínio (Registro.br + Route 53)
+
+O domínio `martinazzo.dev.br` foi comprado no Registro.br, e o DNS dele é atendido pelo **Route 53**.
+Assim o Terraform consegue sozinho validar o certificado HTTPS e apontar `todo.martinazzo.dev.br` para o load balancer.
+
+A zona do Route 53 foi criada **uma única vez**, fora do Terraform, igual ao bucket do state. O destroy não apaga a zona, então os nameservers cadastrados no Registro.br nunca mudam. Custo: US$ 0,50/mês.
+
+```bash
+aws route53 create-hosted-zone --name martinazzo.dev.br --caller-reference pm04-zona
+```
+
+Nameservers da zona (cadastrados no Registro.br):
+
+```
+ns-1296.awsdns-34.org
+ns-22.awsdns-02.com
+ns-1613.awsdns-09.co.uk
+ns-850.awsdns-42.net
+```
+
+Para conferir se a delegação já funciona: `nslookup -type=NS martinazzo.dev.br 8.8.8.8` precisa mostrar os servidores `awsdns`.
 
 ## Secrets e variáveis do GitHub
 
@@ -140,7 +163,7 @@ docker compose up --build -d   # abrir http://localhost
 | ACE-01/06 | print da pipeline verde (3 jobs) com a versão no resumo |
 | ACE-02 | console EC2 mostrando as 2 VMs sem IP público |
 | ACE-03 | security group do db (27017 só do sg-app) e `curl`/`nc` externo falhando |
-| ACE-04 | celular abrindo a URL da aplicação: cadastrar, concluir, reabrir, excluir, recarregar |
+| ACE-04 | celular abrindo https://todo.martinazzo.dev.br (cadeado): cadastrar, concluir, reabrir, excluir, recarregar |
 | ACE-05 | criar tarefa, rodar `reiniciar`, rodar a pipeline de novo: a tarefa continua lá |
 | ACE-07 | log das ações `backup` e `testar-restauracao` |
 | ACE-08 | log das ações `saude` e `logs`; segredos aparecem como `***` |
@@ -153,3 +176,5 @@ docker compose up --build -d   # abrir http://localhost
 | Ansible fica esperando a conexão | a VM ainda não registrou no SSM; espere até 10 min (Systems Manager > Fleet Manager) |
 | Target group *unhealthy* | a API não conecta no banco: rode a ação `logs` |
 | `denied` ao baixar a imagem | rode a pipeline completa (o login no ghcr.io usa o token da própria execução) |
+| Pipeline parada em `aws_acm_certificate_validation` | o Registro.br ainda não está usando os nameservers do Route 53 (veja a seção Domínio) |
+| Navegador não acha `todo.martinazzo.dev.br` | delegação do DNS ainda propagando; teste com `nslookup todo.martinazzo.dev.br 8.8.8.8` |

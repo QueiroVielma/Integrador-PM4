@@ -1,13 +1,21 @@
 # Load balancer: unico recurso aberto para a internet
 resource "aws_security_group" "alb" {
   name        = "${var.project_name}-sg-alb"
-  description = "HTTP publico no load balancer"
+  description = "HTTP e HTTPS publicos no load balancer"
   vpc_id      = aws_vpc.main.id
 
   ingress {
     description = "HTTP da internet"
     from_port   = 80
     to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "HTTPS da internet"
+    from_port   = 443
+    to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }

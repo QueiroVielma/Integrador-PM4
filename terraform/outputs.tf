@@ -1,6 +1,6 @@
 output "app_url" {
-  description = "Endereco publico da aplicacao (HTTP pelo load balancer; dominio com HTTPS sera adicionado depois)"
-  value       = "http://${aws_lb.app.dns_name}"
+  description = "Endereco publico da aplicacao (HTTPS com dominio proprio)"
+  value       = "https://${var.dominio_app}"
 }
 
 output "app_instance_id" {
