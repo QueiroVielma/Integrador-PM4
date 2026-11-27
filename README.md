@@ -4,8 +4,6 @@ Lista de tarefas (frontend React/Nginx, API Node.js/Express e MongoDB) implantad
 
 Endereço: **https://todo.martinazzo.dev.br**
 
-> ⚠️ **O ambiente gera custo** (≈ US$ 0,12/hora com tudo ligado, quase tudo do NAT Gateway e do load balancer). Deixe ligado só para testes e apresentação e rode o **Destruir** ao terminar.
-
 ## Arquitetura
 
 ```
