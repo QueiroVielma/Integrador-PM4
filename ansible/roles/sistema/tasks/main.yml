@@ -1,0 +1,43 @@
+---
+- name: Esperar o cloud-init terminar (evita conflito com o apt da primeira inicializacao)
+  ansible.builtin.command: cloud-init status --wait
+  register: cloud_init
+  changed_when: false
+  failed_when: cloud_init.rc not in [0, 2]
+
+- name: Instalar pacotes do sistema (rede, certificados, utilitarios) e os pedidos na pipeline
+  ansible.builtin.apt:
+    name: "{{ pacotes_base + pacotes_extras }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    lock_timeout: 300
+
+- name: Verificar atualizacoes pendentes do sistema operacional
+  ansible.builtin.command: apt list --upgradable
+  register: pendentes
+  changed_when: false
+
+- name: Atualizacoes pendentes
+  ansible.builtin.debug:
+    msg: >-
+      {{ pendentes.stdout_lines | select('search', 'upgradable') | list | length }} pacote(s) para atualizar.
+      Atualizar agora: {{ 'sim' if atualizar_so else 'nao (parametro atualizar_so desligado)' }}
+
+- name: Aplicar as atualizacoes do sistema operacional
+  ansible.builtin.apt:
+    upgrade: dist
+    autoremove: true
+    lock_timeout: 300
+  when: atualizar_so
+
+- name: Ver se a atualizacao pediu reinicio
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: precisa_reiniciar
+  when: atualizar_so
+
+- name: Reiniciar a VM (os containers voltam sozinhos por causa do restart always)
+  ansible.builtin.reboot:
+    reboot_timeout: 900
+  when: atualizar_so and precisa_reiniciar.stat.exists

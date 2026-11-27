@@ -1,10 +1,4 @@
 ---
-- name: Esperar o cloud-init terminar (evita conflito com o apt da primeira inicializacao)
-  ansible.builtin.command: cloud-init status --wait
-  register: cloud_init
-  changed_when: false
-  failed_when: cloud_init.rc not in [0, 2]
-
 - name: Instalar Docker e a biblioteca Python do Docker
   ansible.builtin.apt:
     name:

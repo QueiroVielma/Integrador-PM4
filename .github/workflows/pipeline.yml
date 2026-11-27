@@ -16,6 +16,24 @@ on:
         description: "Voltar para uma versao anterior: cole o SHA do commit (vazio = versao atual)"
         required: false
         default: ""
+      tipo_vm_app:
+        description: "Tamanho da VM da aplicacao"
+        type: choice
+        options: [t3.micro, t3.small, t3.medium]
+        default: t3.small
+      tipo_vm_db:
+        description: "Tamanho da VM do banco (troca sem perder os dados)"
+        type: choice
+        options: [t3.micro, t3.small, t3.medium]
+        default: t3.small
+      atualizar_so:
+        description: "Aplicar as atualizacoes do sistema operacional (pode reiniciar as VMs)"
+        type: boolean
+        default: false
+      pacotes_extras:
+        description: "Pacotes extras do apt, separados por espaco (ex: tcpdump traceroute)"
+        required: false
+        default: ""
 
 # Evita duas execucoes mexendo na infraestrutura ao mesmo tempo
 concurrency:
@@ -117,8 +135,17 @@ jobs:
       - name: Terraform validate
         run: terraform validate
 
+      # No push os parametros ficam vazios e valem os do terraform.tfvars
       - name: Terraform plan
-        run: terraform plan -input=false -out=tfplan
+        env:
+          TIPO_VM_APP: ${{ inputs.tipo_vm_app }}
+          TIPO_VM_DB: ${{ inputs.tipo_vm_db }}
+        run: |
+          PARAMETROS=""
+          if [ -n "$TIPO_VM_APP" ]; then PARAMETROS="$PARAMETROS -var=app_instance_type=$TIPO_VM_APP"; fi
+          if [ -n "$TIPO_VM_DB" ]; then PARAMETROS="$PARAMETROS -var=db_instance_type=$TIPO_VM_DB"; fi
+          echo "Parametros do Terraform:${PARAMETROS:- (padrao do terraform.tfvars)}"
+          terraform plan -input=false -out=tfplan $PARAMETROS
 
       - name: Terraform apply
         if: github.event_name != 'pull_request'
@@ -192,8 +219,20 @@ jobs:
           DB_ROOT_PASSWORD: ${{ secrets.DB_ROOT_PASSWORD }}
           REGISTRY_USER: ${{ github.actor }}
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ATUALIZAR_SO: ${{ inputs.atualizar_so }}
+          PACOTES_EXTRAS: ${{ inputs.pacotes_extras }}
         run: |
+          if ! echo "$PACOTES_EXTRAS" | grep -Eq '^[a-z0-9.+ -]*$'; then
+            echo "Nome de pacote invalido em pacotes_extras: $PACOTES_EXTRAS"
+            exit 1
+          fi
           export IMAGE_PREFIX="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          {
+            echo "### Parametros desta execucao"
+            echo "- Versao: \`$APP_VERSION\`"
+            echo "- VM app: \`${{ inputs.tipo_vm_app || 'padrao do tfvars' }}\` | VM db: \`${{ inputs.tipo_vm_db || 'padrao do tfvars' }}\`"
+            echo "- Atualizar SO: \`${ATUALIZAR_SO:-false}\` | Pacotes extras: \`${PACOTES_EXTRAS:-nenhum}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
           ansible-playbook site.yml
 
       - name: Teste final pela URL publica (evidencia)

@@ -25,3 +25,18 @@ backup_retencao_dias: 7
 # e passa como variavel de ambiente
 db_password: "{{ lookup('ansible.builtin.env', 'DB_PASSWORD') }}"
 db_root_password: "{{ lookup('ansible.builtin.env', 'DB_ROOT_PASSWORD') }}"
+
+# Sistema operacional: pacotes que toda VM precisa ter
+pacotes_base:
+  - ca-certificates
+  - curl
+  - dnsutils
+  - net-tools
+  - jq
+  - htop
+  - unzip
+
+# Parametros da execucao manual da pipeline
+# (no push ficam vazios: sem atualizar o SO e sem pacotes extras)
+atualizar_so: "{{ lookup('ansible.builtin.env', 'ATUALIZAR_SO') | default('false', true) | bool }}"
+pacotes_extras: "{{ (lookup('ansible.builtin.env', 'PACOTES_EXTRAS') | replace(',', ' ')).split() }}"

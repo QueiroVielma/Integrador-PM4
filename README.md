@@ -54,6 +54,7 @@ terraform/
 ansible/
   site.yml                -> deploy completo
   operacao.yml            -> rotinas do dia a dia
+  roles/sistema           -> pacotes do sistema e atualizações do SO (parâmetro da pipeline)
   roles/docker            -> instala Docker nas duas VMs
   roles/database          -> MongoDB com autenticação, scripts e cron de backup
   roles/app               -> containers backend e frontend na versão pedida
@@ -114,6 +115,19 @@ O push na `main` roda tudo sozinho. Também dá para rodar manualmente em **Acti
 2. **Provisionar (Terraform)**: fmt, validate, plan e apply. Na primeira vez leva uns 10 min por causa do NAT e do ALB.
 3. **Configurar e implantar (Ansible)**: instala o Docker, sobe o MongoDB, faz um backup antes de atualizar e sobe a nova versão da aplicação.
 4. **Teste final**: chama `http://.../health` e `/todos`. A URL e a versão aparecem no resumo da execução.
+
+**Parâmetros da execução manual** (Run workflow):
+
+| Parâmetro | O que faz |
+|---|---|
+| `versao` | SHA de um commit já implantado (rollback); vazio = versão atual |
+| `tipo_vm_app` / `tipo_vm_db` | tamanho das VMs. A troca é feita na mesma VM (para e volta), sem recriar e sem perder os dados |
+| `atualizar_so` | aplica `apt dist-upgrade` e reinicia a VM se precisar. Desligado, o Ansible só mostra quantas atualizações estão pendentes |
+| `pacotes_extras` | pacotes do apt para instalar além dos padrão (`ca-certificates curl dnsutils net-tools jq htop unzip`) |
+
+No push os parâmetros ficam vazios: valem os tamanhos do `terraform.tfvars` e o SO não é atualizado. Para mudar o tamanho de vez, edite o `terraform.tfvars`; se mudar só pela execução manual, o próximo push volta ao valor do arquivo.
+
+O Ansible mostra a versão que está rodando e a versão pedida antes de atualizar e, no fim, confere se os containers estão rodando a versão pedida.
 
 Pull Request para a `main` roda só build, fmt, validate e plan, sem aplicar nada.
 

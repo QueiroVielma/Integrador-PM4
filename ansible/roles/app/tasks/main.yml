@@ -6,6 +6,18 @@
       - image_prefix | length > 0
     fail_msg: "Faltou APP_VERSION/IMAGE_PREFIX (essas variaveis vem da pipeline)"
 
+- name: Ver qual versao da API esta rodando agora
+  community.docker.docker_container_info:
+    name: backend
+  register: backend_atual
+
+- name: Versao atual x versao pedida
+  ansible.builtin.debug:
+    msg: >-
+      Rodando: {{ backend_atual.container.Config.Image if backend_atual.exists else 'nenhuma (primeira instalacao)' }}
+      | Pedida: {{ backend_image }}
+      | {{ 'nada a atualizar' if backend_atual.exists and backend_atual.container.Config.Image == backend_image else 'vai atualizar' }}
+
 - name: Testar se a VM da aplicacao alcanca o banco pela rede privada
   ansible.builtin.wait_for:
     host: "{{ db_host }}"
@@ -71,3 +83,20 @@
 - name: Resultado da verificacao de saude
   ansible.builtin.debug:
     msg: "{{ saude.json }}"
+
+- name: Ler os containers depois do deploy
+  community.docker.docker_container_info:
+    name: "{{ item }}"
+  loop: [backend, frontend]
+  register: containers
+
+- name: Conferir se os containers estao rodando na versao pedida
+  ansible.builtin.assert:
+    that:
+      - item.container.State.Running
+      - item.container.Config.Image is search(app_version)
+    fail_msg: "{{ item.item }} nao esta rodando a versao {{ app_version }}"
+    success_msg: "{{ item.item }} rodando {{ item.container.Config.Image }}"
+  loop: "{{ containers.results }}"
+  loop_control:
+    label: "{{ item.item }}"
