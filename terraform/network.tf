@@ -10,7 +10,7 @@ resource "aws_vpc" "main" {
   enable_dns_hostnames = true
 
   tags = {
-    Name = "${var.project_name}-vpc"
+    Name = "${local.prefixo}-vpc"
   }
 }
 
@@ -19,7 +19,7 @@ resource "aws_internet_gateway" "igw" {
   vpc_id = aws_vpc.main.id
 
   tags = {
-    Name = "${var.project_name}-igw"
+    Name = "${local.prefixo}-igw"
   }
 }
 
@@ -31,7 +31,7 @@ resource "aws_subnet" "publica" {
   availability_zone = data.aws_availability_zones.disponiveis.names[count.index]
 
   tags = {
-    Name = "${var.project_name}-publica-${count.index + 1}"
+    Name = "${local.prefixo}-publica-${count.index + 1}"
   }
 }
 
@@ -42,7 +42,7 @@ resource "aws_subnet" "privada" {
   availability_zone = data.aws_availability_zones.disponiveis.names[0]
 
   tags = {
-    Name = "${var.project_name}-privada"
+    Name = "${local.prefixo}-privada"
   }
 }
 
@@ -52,7 +52,7 @@ resource "aws_eip" "nat" {
   domain = "vpc"
 
   tags = {
-    Name = "${var.project_name}-nat-eip"
+    Name = "${local.prefixo}-nat-eip"
   }
 }
 
@@ -61,7 +61,7 @@ resource "aws_nat_gateway" "nat" {
   subnet_id     = aws_subnet.publica[0].id
 
   tags = {
-    Name = "${var.project_name}-nat"
+    Name = "${local.prefixo}-nat"
   }
 
   depends_on = [aws_internet_gateway.igw]
@@ -77,7 +77,7 @@ resource "aws_route_table" "publica" {
   }
 
   tags = {
-    Name = "${var.project_name}-rt-publica"
+    Name = "${local.prefixo}-rt-publica"
   }
 }
 
@@ -97,7 +97,7 @@ resource "aws_route_table" "privada" {
   }
 
   tags = {
-    Name = "${var.project_name}-rt-privada"
+    Name = "${local.prefixo}-rt-privada"
   }
 }
 

@@ -5,9 +5,20 @@ variable "aws_region" {
 }
 
 variable "environment" {
-  description = "Ambiente de destino"
+  description = "Ambiente de destino (cada um tem state, rede e VMs proprios)"
   type        = string
-  default     = "dev"
+  default     = "prod"
+
+  validation {
+    condition     = contains(["dev", "homolog", "prod"], var.environment)
+    error_message = "Use dev, homolog ou prod."
+  }
+}
+
+variable "instance_name" {
+  description = "Nome base das VMs (vira vm-pm04-app e vm-pm04-db)"
+  type        = string
+  default     = "vm-pm04"
 }
 
 variable "project_name" {
@@ -74,7 +85,14 @@ variable "zona_dns" {
   type        = string
 }
 
-variable "dominio_app" {
-  description = "Endereco da aplicacao com HTTPS"
+variable "subdominio" {
+  description = "Subdominio da aplicacao. Em prod fica todo.<zona>; nos outros ambientes, todo-<ambiente>.<zona>"
   type        = string
+  default     = "todo"
+}
+
+locals {
+  # Nome dos recursos e endereco mudam por ambiente, para dev/homolog/prod nao se misturarem
+  prefixo     = "${var.project_name}-${var.environment}"
+  dominio_app = var.environment == "prod" ? "${var.subdominio}.${var.zona_dns}" : "${var.subdominio}-${var.environment}.${var.zona_dns}"
 }

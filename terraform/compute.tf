@@ -5,7 +5,7 @@ data "aws_ssm_parameter" "ubuntu" {
 
 # Chave SSH usada pelo Ansible (o acesso passa pelo tunel do Session Manager)
 resource "aws_key_pair" "pm04" {
-  key_name   = "${var.project_name}-key"
+  key_name   = "${local.prefixo}-key"
   public_key = var.ssh_public_key
 }
 
@@ -27,7 +27,7 @@ resource "aws_instance" "app" {
   }
 
   tags = {
-    Name = "${var.project_name}-app"
+    Name = "${var.instance_name}-app"
     Role = "app"
   }
 
@@ -57,7 +57,7 @@ resource "aws_instance" "db" {
   }
 
   tags = {
-    Name = "${var.project_name}-db"
+    Name = "${var.instance_name}-db"
     Role = "db"
   }
 

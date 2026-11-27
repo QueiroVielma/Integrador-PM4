@@ -4,10 +4,10 @@ mongo_image: "mongo:8.0.4"
 # Imagens da aplicacao: construidas pela pipeline e publicadas no GitHub (ghcr.io).
 # A tag e o commit do Git, entao cada versao implantada e identificavel.
 # A pipeline passa esses valores por variavel de ambiente.
-image_prefix: "{{ lookup('ansible.builtin.env', 'IMAGE_PREFIX') }}"
+image_base: "{{ lookup('ansible.builtin.env', 'IMAGE_BASE') }}"
 app_version: "{{ lookup('ansible.builtin.env', 'APP_VERSION') }}"
-backend_image: "{{ image_prefix }}/todo-backend:{{ app_version }}"
-frontend_image: "{{ image_prefix }}/todo-frontend:{{ app_version }}"
+backend_image: "{{ image_base }}-backend:{{ app_version }}"
+frontend_image: "{{ image_base }}-frontend:{{ app_version }}"
 
 # Login no registry so durante o deploy (token temporario da pipeline)
 registry_user: "{{ lookup('ansible.builtin.env', 'REGISTRY_USER') }}"

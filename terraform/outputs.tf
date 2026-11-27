@@ -1,6 +1,6 @@
 output "app_url" {
   description = "Endereco publico da aplicacao (HTTPS com dominio proprio)"
-  value       = "https://${var.dominio_app}"
+  value       = "https://${local.dominio_app}"
 }
 
 output "app_instance_id" {

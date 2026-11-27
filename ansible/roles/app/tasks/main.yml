@@ -3,8 +3,8 @@
   ansible.builtin.assert:
     that:
       - app_version | length > 0
-      - image_prefix | length > 0
-    fail_msg: "Faltou APP_VERSION/IMAGE_PREFIX (essas variaveis vem da pipeline)"
+      - image_base | length > 0
+    fail_msg: "Faltou APP_VERSION/IMAGE_BASE (essas variaveis vem da pipeline)"
 
 - name: Ver qual versao da API esta rodando agora
   community.docker.docker_container_info:

@@ -5,6 +5,11 @@ name: Operacao (saude, logs, reinicio, backup)
 on:
   workflow_dispatch:
     inputs:
+      environment:
+        description: "Ambiente"
+        type: choice
+        options: [prod, homolog, dev]
+        default: prod
       acao:
         description: "O que fazer"
         required: true
@@ -18,7 +23,7 @@ on:
           - limpar-lista
 
 concurrency:
-  group: infra-pm04
+  group: infra-pm04-${{ inputs.environment }}
   cancel-in-progress: false
 
 permissions:
@@ -29,7 +34,7 @@ env:
 
 jobs:
   operacao:
-    name: "Acao: ${{ inputs.acao }}"
+    name: "Acao: ${{ inputs.acao }} (${{ inputs.environment }})"
     runs-on: ubuntu-latest
 
     steps:
@@ -53,7 +58,7 @@ jobs:
       - name: Ler os IDs das VMs no state do Terraform
         working-directory: terraform
         run: |
-          terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+          terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" -backend-config="key=pm04/${{ inputs.environment }}/terraform.tfstate"
           echo "APP_ID=$(terraform output -raw app_instance_id)" >> "$GITHUB_ENV"
           echo "DB_ID=$(terraform output -raw db_instance_id)" >> "$GITHUB_ENV"
           echo "DB_IP=$(terraform output -raw db_private_ip)" >> "$GITHUB_ENV"

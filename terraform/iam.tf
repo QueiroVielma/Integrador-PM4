@@ -9,7 +9,7 @@ locals {
 
 resource "aws_iam_role" "ssm" {
   count = local.criar_role ? 1 : 0
-  name  = "${var.project_name}-role-ssm"
+  name  = "${local.prefixo}-role-ssm"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -29,6 +29,6 @@ resource "aws_iam_role_policy_attachment" "ssm" {
 
 resource "aws_iam_instance_profile" "ssm" {
   count = local.criar_role ? 1 : 0
-  name  = "${var.project_name}-profile-ssm"
+  name  = "${local.prefixo}-profile-ssm"
   role  = aws_iam_role.ssm[0].name
 }

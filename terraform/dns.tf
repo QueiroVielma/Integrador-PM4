@@ -8,11 +8,11 @@ data "aws_route53_zone" "principal" {
 
 # Certificado gratuito da AWS, validado automaticamente por DNS
 resource "aws_acm_certificate" "app" {
-  domain_name       = var.dominio_app
+  domain_name       = local.dominio_app
   validation_method = "DNS"
 
   tags = {
-    Name = "${var.project_name}-certificado"
+    Name = "${local.prefixo}-certificado"
   }
 
   lifecycle {
@@ -41,7 +41,7 @@ resource "aws_acm_certificate_validation" "app" {
 # todo.martinazzo.dev.br -> load balancer
 resource "aws_route53_record" "app" {
   zone_id = data.aws_route53_zone.principal.zone_id
-  name    = var.dominio_app
+  name    = local.dominio_app
   type    = "A"
 
   alias {

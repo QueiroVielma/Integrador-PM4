@@ -4,12 +4,17 @@ name: Destruir infraestrutura PM-04
 on:
   workflow_dispatch:
     inputs:
+      environment:
+        description: "Ambiente"
+        type: choice
+        options: [prod, homolog, dev]
+        default: prod
       confirmacao:
         description: 'Digite DESTRUIR para confirmar'
         required: true
 
 concurrency:
-  group: infra-pm04
+  group: infra-pm04-${{ inputs.environment }}
   cancel-in-progress: false
 
 env:
@@ -40,7 +45,7 @@ jobs:
           terraform_wrapper: false
 
       - name: Terraform init
-        run: terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+        run: terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" -backend-config="key=pm04/${{ inputs.environment }}/terraform.tfstate"
 
       - name: Terraform destroy
-        run: terraform destroy -input=false -auto-approve
+        run: terraform destroy -input=false -auto-approve -var="environment=${{ inputs.environment }}"

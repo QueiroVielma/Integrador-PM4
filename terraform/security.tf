@@ -1,6 +1,6 @@
 # Load balancer: unico recurso aberto para a internet
 resource "aws_security_group" "alb" {
-  name        = "${var.project_name}-sg-alb"
+  name        = "${local.prefixo}-sg-alb"
   description = "HTTP e HTTPS publicos no load balancer"
   vpc_id      = aws_vpc.main.id
 
@@ -28,14 +28,14 @@ resource "aws_security_group" "alb" {
   }
 
   tags = {
-    Name = "${var.project_name}-sg-alb"
+    Name = "${local.prefixo}-sg-alb"
   }
 }
 
 # VM da aplicacao: so recebe trafego vindo do load balancer
 # Obs: nao tem porta 22 aberta, o acesso do Ansible e pelo Session Manager
 resource "aws_security_group" "app" {
-  name        = "${var.project_name}-sg-app"
+  name        = "${local.prefixo}-sg-app"
   description = "Aplicacao acessivel somente pelo ALB"
   vpc_id      = aws_vpc.main.id
 
@@ -55,13 +55,13 @@ resource "aws_security_group" "app" {
   }
 
   tags = {
-    Name = "${var.project_name}-sg-app"
+    Name = "${local.prefixo}-sg-app"
   }
 }
 
 # VM do banco: so a VM da aplicacao acessa o MongoDB (nunca a internet)
 resource "aws_security_group" "db" {
-  name        = "${var.project_name}-sg-db"
+  name        = "${local.prefixo}-sg-db"
   description = "MongoDB acessivel somente pela aplicacao"
   vpc_id      = aws_vpc.main.id
 
@@ -81,6 +81,6 @@ resource "aws_security_group" "db" {
   }
 
   tags = {
-    Name = "${var.project_name}-sg-db"
+    Name = "${local.prefixo}-sg-db"
   }
 }

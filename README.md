@@ -18,8 +18,8 @@ Endereço: **https://todo.martinazzo.dev.br**
 | REQ-04 · persistência | Dados do MongoDB em `/opt/mongo/data`, fora do container. Backup todo dia às 03:00 com 7 dias de retenção, e teste de restauração em banco separado |
 | REQ-05 · publicação | Domínio próprio com HTTPS (certificado do ACM no load balancer). Quem entra por HTTP é redirecionado |
 | REQ-06 · disponibilidade | Containers com `restart: always`. A rota `/health` só responde 200 se a API estiver conectada no banco, e o ALB usa ela para saber se a VM está saudável |
-| 3.1 · pipeline | GitHub Actions com execução manual e parâmetros. Terraform e Ansible rodam em sequência e a execução para no primeiro erro |
-| 3.2 · Terraform | Variáveis, `init`/`plan`/`apply` pela pipeline, state no S3 com lock. Trocar o tamanho da VM não recria a máquina |
+| 3.1 · pipeline | GitHub Actions com execução manual e os parâmetros recomendados (`environment`, `instance_name`, `instance_type`, `docker_image`, `docker_tag`, `update_os`, `extra_packages`). Terraform e Ansible rodam em sequência e a execução para no primeiro erro |
+| 3.2 · Terraform | Variáveis, `init`/`plan`/`apply` pela pipeline, state no S3 com lock, separado por ambiente. Trocar o tamanho da VM não recria a máquina |
 | 3.3 · Ansible | Instala pacotes e Docker, sobe os containers na versão pedida, atualiza o sistema operacional quando pedido e confere se tudo está rodando |
 
 **Stack:** AWS (VPC, EC2, ALB, NAT, Route 53, ACM, SSM, S3, IAM) · Terraform 1.17 · Ansible · Docker · GitHub Actions · GHCR.
@@ -54,8 +54,8 @@ O visitante acessa o domínio, o ALB recebe a conexão HTTPS e repassa para o Ng
 
 | VM | Sub-rede | Exposição | Executa |
 | --- | --- | --- | --- |
-| `pm04-app` | Privada, sem IP público | Porta 80 só do security group do ALB | Containers `frontend` (Nginx + React) e `backend` (API) |
-| `pm04-db` | Privada, sem IP público | Porta 27017 só do security group da app | Container `mongo` (MongoDB 8.0.4), backup diário |
+| `vm-pm04-app` | Privada, sem IP público | Porta 80 só do security group do ALB | Containers `frontend` (Nginx + React) e `backend` (API) |
+| `vm-pm04-db` | Privada, sem IP público | Porta 27017 só do security group da app | Container `mongo` (MongoDB 8.0.4), backup diário |
 
 Por que não um IP público direto na VM: o IP muda quando a VM é recriada, a VM ficaria exposta na internet e não teria health check. Com o ALB o endereço é fixo, o certificado fica nele e dá para colocar mais VMs atrás depois.
 
@@ -94,7 +94,7 @@ Duas coisas precisam existir antes da primeira execução e não podem ser apaga
 
 **Variáveis:** ficam no `terraform.tfvars` (região, tamanhos das VMs, health check, domínio). A chave SSH pública vem do secret `SSH_PUBLIC_KEY`, e os tamanhos das VMs podem ser trocados pelos parâmetros da pipeline.
 
-**Alteração sem recriar:** trocar `tipo_vm_app` ou `tipo_vm_db` faz uma atualização no lugar (`~` no plan). A VM para e volta com o mesmo disco e o mesmo IP privado, então o banco não perde nada.
+**Alteração sem recriar:** trocar `app_instance_type`, `db_instance_type` ou `instance_name` faz uma atualização no lugar (`~` no plan). A VM para e volta com o mesmo disco e o mesmo IP privado, então o banco não perde nada.
 
 ## Ansible · configuração e deploy
 
@@ -121,7 +121,7 @@ O IP privado do banco vira a variável `db_host`, usada pela API. Como a conexã
 
 | Role | Onde | O que faz |
 | --- | --- | --- |
-| `sistema` | todas | Espera o cloud-init, instala `ca-certificates curl dnsutils net-tools jq htop unzip` e os pacotes extras pedidos. Mostra quantas atualizações do SO estão pendentes e, se `atualizar_so` estiver ligado, faz o `apt dist-upgrade` e reinicia a VM se precisar |
+| `sistema` | todas | Espera o cloud-init, instala `ca-certificates curl dnsutils net-tools jq htop unzip` e os pacotes extras pedidos. Mostra quantas atualizações do SO estão pendentes e, se `update_os` estiver ligado, faz o `apt dist-upgrade` e reinicia a VM se precisar |
 | `docker` | todas | Docker e a biblioteca Python do Docker, serviço habilitado |
 | `database` | db | Pastas de dados e backup, script de inicialização (cria o usuário `todo` e 3 tarefas de exemplo só na primeira vez), container `mongo` com autenticação, scripts de operação, cron do backup e um backup antes de qualquer atualização |
 | `app` | app | Mostra a versão rodando e a pedida, testa a conexão com o banco, faz login no GHCR só se tiver versão nova, sobe `backend` e `frontend` na rede `todo-net`, espera `/health` = 200 e confere se os containers estão na versão pedida |
@@ -143,7 +143,7 @@ Não muda a configuração das VMs. Recebe a variável `acao`:
 
 ## Pipelines (GitHub Actions)
 
-São 3 workflows. Os três usam o mesmo grupo de `concurrency` (`infra-pm04`), então nunca rodam dois ao mesmo tempo mexendo na infraestrutura.
+São 3 workflows. Os três usam o grupo de `concurrency` `infra-pm04-<ambiente>`, então nunca rodam dois ao mesmo tempo no mesmo ambiente. O Operacao e o Destruir também pedem o ambiente.
 
 | Workflow | Gatilho | O que faz |
 | --- | --- | --- |
@@ -162,11 +162,14 @@ São 3 workflows. Os três usam o mesmo grupo de `concurrency` (`infra-pm04`), e
 
 | Parâmetro | Padrão | O que faz |
 | --- | --- | --- |
-| `versao` | vazio | SHA de uma versão já implantada, para voltar (rollback). Vazio = commit atual |
-| `tipo_vm_app` | `t3.small` | Tamanho da VM da aplicação (`t3.micro`, `t3.small`, `t3.medium`) |
-| `tipo_vm_db` | `t3.small` | Tamanho da VM do banco |
-| `atualizar_so` | desligado | Aplica as atualizações do sistema operacional |
-| `pacotes_extras` | vazio | Pacotes do apt separados por espaço (ex.: `tcpdump traceroute`) |
+| `environment` | `prod` | Ambiente de destino (`dev`, `homolog`, `prod`). Cada um tem state próprio (`pm04/<ambiente>/terraform.tfstate`), rede, VMs e endereço próprios: prod em `todo.martinazzo.dev.br`, os outros em `todo-<ambiente>.martinazzo.dev.br` |
+| `instance_name` | `vm-pm04` | Nome das VMs (`vm-pm04-app` e `vm-pm04-db`). Trocar só muda a tag, sem recriar |
+| `app_instance_type` | `t3.small` | Tamanho da VM da aplicação (`t3.micro`, `t3.small`, `t3.medium`) |
+| `db_instance_type` | `t3.small` | Tamanho da VM do banco |
+| `docker_image` | vazio | Imagem da aplicação sem o sufixo. Vazio = `ghcr.io/queirovielma/todo`, que vira `todo-backend` e `todo-frontend` |
+| `docker_tag` | vazio | Versão das imagens (SHA de um commit já publicado). Vazio = constrói e implanta o commit atual. Também serve para voltar de versão |
+| `update_os` | desligado | Aplica as atualizações do sistema operacional |
+| `extra_packages` | vazio | Pacotes do apt separados por espaço (ex.: `tcpdump traceroute`) |
 
 No push os parâmetros ficam vazios e valem os tamanhos do `terraform.tfvars`. Se uma execução manual mudar o tamanho de uma VM, a próxima com o padrão volta para o valor do arquivo.
 
@@ -189,8 +192,8 @@ Nenhuma ferramenta chama a outra diretamente. O GitHub Actions coordena tudo, e 
 
 | De → Para | O que passa | Como |
 | --- | --- | --- |
-| GitHub → Terraform | Chave SSH pública e tamanhos das VMs | `TF_VAR_ssh_public_key` e `-var` no plan |
-| Terraform ↔ S3 | State | Backend S3 `pm04/terraform.tfstate` com lock |
+| GitHub → Terraform | Chave SSH pública, ambiente, nome e tamanhos das VMs | `TF_VAR_ssh_public_key` e `-var` no plan |
+| Terraform ↔ S3 | State | Backend S3 `pm04/<ambiente>/terraform.tfstate` com lock |
 | Terraform → Ansible | IDs das VMs, IP privado do banco, URL | Outputs do job → `gerar-inventario.sh` → `inventory.ini` |
 | GitHub → Ansible | Senhas, versão, parâmetros | Variáveis de ambiente lidas no `group_vars/all.yml` |
 | Runner → VMs | Comandos do Ansible | SSH dentro do Session Manager |
@@ -213,7 +216,7 @@ Nenhuma ferramenta chama a outra diretamente. O GitHub Actions coordena tudo, e 
 
 - **Falha no Terraform:** o Ansible nem começa. Corrige o código e roda de novo.
 - **Falha no Ansible:** a infraestrutura já existe. Como o playbook é idempotente, é só corrigir e rodar de novo (o plan vem sem mudanças).
-- **Versão com problema:** Run workflow com o SHA da versão anterior no campo `versao`. O build é pulado e só os containers da aplicação são trocados.
+- **Versão com problema:** Run workflow com o SHA da versão anterior no campo `docker_tag`. O build é pulado e só os containers da aplicação são trocados.
 - **Perda de dados:** restaurar o último backup (comando no fim do documento).
 
 ## Roteiro para a apresentação
@@ -223,12 +226,12 @@ Os três testes obrigatórios são feitos pelo Run workflow da pipeline. Em cada
 | Cenário | Como rodar | O que mostrar |
 | --- | --- | --- |
 | 1 · Criação inicial | Parâmetros padrão | `Plan: N to add`; log instalando pacotes, Docker e containers; site abrindo com cadeado |
-| 2 · Atualização | `tipo_vm_app = t3.medium` e `pacotes_extras = tcpdump traceroute` | `0 to add, 1 to change, 0 to destroy` (a VM não é recriada); pacotes como `changed`; tarefas criadas antes continuam lá |
+| 2 · Atualização | `app_instance_type = t3.medium` e `extra_packages = tcpdump traceroute` | `0 to add, 1 to change, 0 to destroy` (a VM não é recriada); pacotes como `changed`; tarefas criadas antes continuam lá |
 | 3 · Sem alterações | Os mesmos parâmetros do cenário 2 | `No changes` no plan e `changed=0` nas duas VMs |
 
 Observações:
 
-- A atualização do SO (`atualizar_so`) fica melhor numa execução separada, antes do cenário 2. Se ficar ligada no cenário 3 e sair uma atualização nova da Ubuntu entre as duas execuções, ela aparece como `changed`.
+- A atualização do SO (`update_os`) fica melhor numa execução separada, antes do cenário 2. Se ficar ligada no cenário 3 e sair uma atualização nova da Ubuntu entre as duas execuções, ela aparece como `changed`.
 - Para mostrar a troca de imagem: mudar um texto no `App.js` e fazer push. O log do Ansible mostra a versão antiga, a nova e "vai atualizar".
 
 ### Validação da demanda

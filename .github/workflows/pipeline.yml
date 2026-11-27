@@ -14,32 +14,45 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      versao:
-        description: "Voltar para uma versao anterior: cole o SHA do commit (vazio = versao atual)"
+      environment:
+        description: "Ambiente de destino (cada um tem state, rede e VMs proprios)"
+        type: choice
+        options: [prod, homolog, dev]
+        default: prod
+      instance_name:
+        description: "Nome base das VMs (vira <nome>-app e <nome>-db)"
         required: false
-        default: ""
-      tipo_vm_app:
+        default: "vm-pm04"
+      app_instance_type:
         description: "Tamanho da VM da aplicacao"
         type: choice
         options: [t3.micro, t3.small, t3.medium]
         default: t3.small
-      tipo_vm_db:
+      db_instance_type:
         description: "Tamanho da VM do banco (troca sem perder os dados)"
         type: choice
         options: [t3.micro, t3.small, t3.medium]
         default: t3.small
-      atualizar_so:
+      docker_image:
+        description: "Imagem da aplicacao sem o sufixo (vazio = ghcr.io/<dono>/todo, gera todo-backend e todo-frontend)"
+        required: false
+        default: ""
+      docker_tag:
+        description: "Versao das imagens (SHA de um commit ja publicado). Vazio = constroi o commit atual"
+        required: false
+        default: ""
+      update_os:
         description: "Aplicar as atualizacoes do sistema operacional (pode reiniciar as VMs)"
         type: boolean
         default: false
-      pacotes_extras:
+      extra_packages:
         description: "Pacotes extras do apt, separados por espaco (ex: tcpdump traceroute)"
         required: false
         default: ""
 
-# Evita duas execucoes mexendo na infraestrutura ao mesmo tempo
+# Evita duas execucoes mexendo no mesmo ambiente ao mesmo tempo
 concurrency:
-  group: infra-pm04
+  group: infra-pm04-${{ inputs.environment || 'prod' }}
   cancel-in-progress: false
 
 permissions:
@@ -49,14 +62,16 @@ permissions:
 env:
   AWS_REGION: us-east-2
   TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
-  # Versao implantada = commit do Git (ou a versao escolhida no rollback)
-  APP_VERSION: ${{ inputs.versao || github.sha }}
+  # No push os parametros ficam vazios: ambiente prod e imagens do commit atual
+  ENVIRONMENT: ${{ inputs.environment || 'prod' }}
+  APP_VERSION: ${{ inputs.docker_tag || github.sha }}
+  DOCKER_IMAGE: ${{ inputs.docker_image }}
 
 jobs:
   build:
     name: Construir imagens (Docker)
-    # No rollback as imagens ja existem, nao precisa construir de novo
-    if: ${{ !inputs.versao }}
+    # Se foi pedida uma imagem ou versao ja existente, nao precisa construir
+    if: ${{ !inputs.docker_tag && !inputs.docker_image }}
     runs-on: ubuntu-latest
 
     steps:
@@ -131,8 +146,21 @@ jobs:
       - name: Terraform fmt (padrao de formatacao)
         run: terraform fmt -check -recursive
 
+      - name: Conferir os parametros
+        env:
+          INSTANCE_NAME: ${{ inputs.instance_name }}
+        run: |
+          if ! echo "$INSTANCE_NAME" | grep -Eq '^[a-z0-9-]{0,40}$'; then
+            echo "instance_name invalido (use letras minusculas, numeros e hifen): $INSTANCE_NAME"
+            exit 1
+          fi
+
+      # Cada ambiente tem o seu proprio state: dev, homolog e prod nunca se misturam
       - name: Terraform init
-        run: terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+        run: >
+          terraform init -input=false
+          -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+          -backend-config="key=pm04/$ENVIRONMENT/terraform.tfstate"
 
       - name: Terraform validate
         run: terraform validate
@@ -140,17 +168,19 @@ jobs:
       # No push os parametros ficam vazios e valem os do terraform.tfvars
       - name: Terraform plan
         env:
-          TIPO_VM_APP: ${{ inputs.tipo_vm_app }}
-          TIPO_VM_DB: ${{ inputs.tipo_vm_db }}
+          INSTANCE_NAME: ${{ inputs.instance_name }}
+          APP_INSTANCE_TYPE: ${{ inputs.app_instance_type }}
+          DB_INSTANCE_TYPE: ${{ inputs.db_instance_type }}
         run: |
-          PARAMETROS=""
-          if [ -n "$TIPO_VM_APP" ]; then PARAMETROS="$PARAMETROS -var=app_instance_type=$TIPO_VM_APP"; fi
-          if [ -n "$TIPO_VM_DB" ]; then PARAMETROS="$PARAMETROS -var=db_instance_type=$TIPO_VM_DB"; fi
-          echo "Parametros do Terraform:${PARAMETROS:- (padrao do terraform.tfvars)}"
+          PARAMETROS="-var=environment=$ENVIRONMENT"
+          if [ -n "$INSTANCE_NAME" ]; then PARAMETROS="$PARAMETROS -var=instance_name=$INSTANCE_NAME"; fi
+          if [ -n "$APP_INSTANCE_TYPE" ]; then PARAMETROS="$PARAMETROS -var=app_instance_type=$APP_INSTANCE_TYPE"; fi
+          if [ -n "$DB_INSTANCE_TYPE" ]; then PARAMETROS="$PARAMETROS -var=db_instance_type=$DB_INSTANCE_TYPE"; fi
+          echo "Parametros do Terraform: $PARAMETROS"
           terraform plan -input=false -out=tfplan $PARAMETROS
           {
-            echo "### Terraform plan"
-            echo "- Parametros:${PARAMETROS:- padrao do terraform.tfvars}"
+            echo "### Terraform plan (ambiente $ENVIRONMENT)"
+            echo "- Parametros: $PARAMETROS"
             echo "- Resultado: \`$(terraform show -no-color tfplan | grep -E '^(Plan:|No changes)' || echo 'ver o log')\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -226,19 +256,24 @@ jobs:
           DB_ROOT_PASSWORD: ${{ secrets.DB_ROOT_PASSWORD }}
           REGISTRY_USER: ${{ github.actor }}
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ATUALIZAR_SO: ${{ inputs.atualizar_so }}
-          PACOTES_EXTRAS: ${{ inputs.pacotes_extras }}
+          ATUALIZAR_SO: ${{ inputs.update_os }}
+          PACOTES_EXTRAS: ${{ inputs.extra_packages }}
         run: |
-          if ! echo "$PACOTES_EXTRAS" | grep -Eq '^[a-z0-9.+ -]*$'; then
-            echo "Nome de pacote invalido em pacotes_extras: $PACOTES_EXTRAS"
+          if ! echo "$PACOTES_EXTRAS" | grep -Eq '^[a-z0-9.+ ,-]*$'; then
+            echo "Nome de pacote invalido em extra_packages: $PACOTES_EXTRAS"
             exit 1
           fi
-          export IMAGE_PREFIX="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          if ! echo "$DOCKER_IMAGE" | grep -Eq '^[a-z0-9./_-]*$' || ! echo "$APP_VERSION" | grep -Eq '^[A-Za-z0-9._-]+$'; then
+            echo "docker_image ou docker_tag invalido"
+            exit 1
+          fi
+          export IMAGE_BASE="${DOCKER_IMAGE:-ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/todo}"
           {
             echo "### Parametros desta execucao"
-            echo "- Versao: \`$APP_VERSION\`"
-            echo "- VM app: \`${{ inputs.tipo_vm_app || 'padrao do tfvars' }}\` | VM db: \`${{ inputs.tipo_vm_db || 'padrao do tfvars' }}\`"
-            echo "- Atualizar SO: \`${ATUALIZAR_SO:-false}\` | Pacotes extras: \`${PACOTES_EXTRAS:-nenhum}\`"
+            echo "- Ambiente: \`$ENVIRONMENT\` | Nome das VMs: \`${{ inputs.instance_name || 'padrao do tfvars' }}\`"
+            echo "- VM app: \`${{ inputs.app_instance_type || 'padrao do tfvars' }}\` | VM db: \`${{ inputs.db_instance_type || 'padrao do tfvars' }}\`"
+            echo "- Imagens: \`$IMAGE_BASE-backend\` e \`$IMAGE_BASE-frontend\` | Tag: \`$APP_VERSION\`"
+            echo "- update_os: \`${ATUALIZAR_SO:-false}\` | extra_packages: \`${PACOTES_EXTRAS:-nenhum}\`"
           } >> "$GITHUB_STEP_SUMMARY"
           set -o pipefail
           ansible-playbook site.yml | tee ansible.log
@@ -260,7 +295,7 @@ jobs:
               echo "Saude: $(cat /tmp/saude.json)"
               echo "Tarefas: $(curl -s "$URL/todos" | head -c 300)"
               {
-                echo "### Aplicacao no ar: $URL"
+                echo "### Aplicacao no ar ($ENVIRONMENT): $URL"
                 echo "- Versao: \`$APP_VERSION\`"
                 echo "- Saude: \`$(cat /tmp/saude.json)\`"
               } >> "$GITHUB_STEP_SUMMARY"

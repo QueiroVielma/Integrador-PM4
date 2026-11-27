@@ -9,9 +9,8 @@ terraform {
   }
 
   # O state fica em um bucket S3 para a pipeline conseguir ler e gravar.
-  # O nome do bucket e passado no "terraform init -backend-config=bucket=..."
+  # Bucket e key (pm04/<ambiente>/terraform.tfstate) sao passados no terraform init
   backend "s3" {
-    key          = "pm04/terraform.tfstate"
     region       = "us-east-2"
     use_lockfile = true
   }
