@@ -15,3 +15,6 @@ ansible/inventory.ini
 pm04
 pm04.pub
 .env
+
+# Documento de entrega (fica so na maquina)
+entrega/
