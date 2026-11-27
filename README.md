@@ -170,6 +170,43 @@ cd app
 docker compose up --build -d   # abrir http://localhost
 ```
 
+## Testes obrigatórios da apresentação
+
+Os três cenários são feitos em **Actions > Pipeline PM-04 > Run workflow**. Em cada execução, o resumo mostra os parâmetros, o resultado do `terraform plan`, o PLAY RECAP do Ansible e a URL testada.
+
+### Cenário 1: criação inicial
+Rodar com os parâmetros padrão (`t3.small` / `t3.small`, sem atualizar o SO, sem pacotes extras).
+
+Evidências:
+- Pipeline verde com os 3 jobs.
+- Resumo mostrando `Plan: N to add, 0 to change, 0 to destroy`.
+- Log do Ansible: pacotes instalados, Docker instalado, MongoDB e containers criados, mensagem "primeira instalacao".
+- `https://todo.martinazzo.dev.br` aberto no navegador.
+
+### Cenário 2: atualização do ambiente
+Rodar mudando **`tipo_vm_app` para `t3.medium`** (infraestrutura) e preenchendo **`pacotes_extras` com `tcpdump traceroute`** (manutenção). Para mostrar a atualização do SO, ligue **`atualizar_so`** numa execução separada, antes deste cenário.
+
+Evidências:
+- Resumo do plan com `0 to add, 1 to change, 0 to destroy`: a VM muda de tamanho sem ser recriada.
+- Log do Ansible: "Instalar pacotes..." como `changed`, e a quantidade de atualizações pendentes do SO.
+- Tarefas criadas antes da mudança continuam na lista.
+- Opcional, atualização de imagem: mudar um texto no `App.js` e fazer push. O log mostra "Rodando: ...:sha_antigo | Pedida: ...:sha_novo | vai atualizar".
+
+### Cenário 3: reexecução sem alterações
+Rodar de novo com **os mesmos parâmetros do cenário 2**.
+
+Evidências:
+- Resumo do plan com `No changes`.
+- PLAY RECAP com `changed=0` nas duas VMs e o log com "nada a atualizar".
+- Se `atualizar_so` estiver ligado e a Ubuntu tiver publicado uma atualização entre uma execução e outra, o upgrade aparece como `changed`. Isso é o comportamento esperado; para a demonstração, deixe `atualizar_so` desligado nos cenários 2 e 3.
+
+> Se rodar com parâmetros diferentes (ou fizer push), o tamanho volta ao do `terraform.tfvars`, e isso é uma alteração.
+
+### Validação da demanda
+A tabela de requisitos no início deste README liga cada requisito do escopo à parte da infraestrutura que o atende.
+
+Evidências: console EC2 com as 2 VMs sem IP público, target group *healthy*, security group do banco liberando a 27017 só para o SG da app, cadeado do HTTPS e as ações `saude`, `backup` e `testar-restauracao` do workflow Operacao.
+
 ## Evidências para o relatório
 
 | Critério | Evidência |

@@ -146,6 +146,11 @@ jobs:
           if [ -n "$TIPO_VM_DB" ]; then PARAMETROS="$PARAMETROS -var=db_instance_type=$TIPO_VM_DB"; fi
           echo "Parametros do Terraform:${PARAMETROS:- (padrao do terraform.tfvars)}"
           terraform plan -input=false -out=tfplan $PARAMETROS
+          {
+            echo "### Terraform plan"
+            echo "- Parametros:${PARAMETROS:- padrao do terraform.tfvars}"
+            echo "- Resultado: \`$(terraform show -no-color tfplan | grep -E '^(Plan:|No changes)' || echo 'ver o log')\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Terraform apply
         if: github.event_name != 'pull_request'
@@ -233,7 +238,14 @@ jobs:
             echo "- VM app: \`${{ inputs.tipo_vm_app || 'padrao do tfvars' }}\` | VM db: \`${{ inputs.tipo_vm_db || 'padrao do tfvars' }}\`"
             echo "- Atualizar SO: \`${ATUALIZAR_SO:-false}\` | Pacotes extras: \`${PACOTES_EXTRAS:-nenhum}\`"
           } >> "$GITHUB_STEP_SUMMARY"
-          ansible-playbook site.yml
+          set -o pipefail
+          ansible-playbook site.yml | tee ansible.log
+          {
+            echo "### Ansible (changed=0 em todas as VMs = nada precisou mudar)"
+            echo '```'
+            sed -n '/PLAY RECAP/,$p' ansible.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Teste final pela URL publica (evidencia)
         run: |

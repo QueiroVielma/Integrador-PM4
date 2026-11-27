@@ -88,7 +88,8 @@
   retries: 5
   delay: 10
   until: backup.rc == 0
-  changed_when: true
+  # O backup e uma rotina de protecao, nao muda a configuracao da VM
+  changed_when: false
 
 - name: Resultado do backup
   ansible.builtin.debug:

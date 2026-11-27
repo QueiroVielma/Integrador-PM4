@@ -11,12 +11,16 @@
     name: backend
   register: backend_atual
 
+- name: Decidir se precisa baixar uma versao nova
+  ansible.builtin.set_fact:
+    versao_nova: "{{ (not backend_atual.exists or backend_atual.container.Config.Image != backend_image) | bool }}"
+
 - name: Versao atual x versao pedida
   ansible.builtin.debug:
     msg: >-
       Rodando: {{ backend_atual.container.Config.Image if backend_atual.exists else 'nenhuma (primeira instalacao)' }}
       | Pedida: {{ backend_image }}
-      | {{ 'nada a atualizar' if backend_atual.exists and backend_atual.container.Config.Image == backend_image else 'vai atualizar' }}
+      | {{ 'vai atualizar' if versao_nova else 'nada a atualizar' }}
 
 - name: Testar se a VM da aplicacao alcanca o banco pela rede privada
   ansible.builtin.wait_for:
@@ -29,7 +33,7 @@
     registry_url: ghcr.io
     username: "{{ registry_user }}"
     password: "{{ registry_token }}"
-  when: registry_token | length > 0
+  when: versao_nova and registry_token | length > 0
   no_log: true
 
 - name: Rede Docker interna entre o Nginx e a API
@@ -69,7 +73,7 @@
   community.docker.docker_login:
     registry_url: ghcr.io
     state: absent
-  when: registry_token | length > 0
+  when: versao_nova and registry_token | length > 0
 
 - name: Verificar a saude (Nginx -> API -> MongoDB) dentro da VM
   ansible.builtin.uri:
