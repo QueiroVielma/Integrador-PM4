@@ -1,7 +1,13 @@
 name: Pipeline PM-04 (Terraform + Ansible)
 
-# Roda so pelo botao Run workflow (com parametros). Pull Request so faz build e plan.
 on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "terraform/**"
+      - "ansible/**"
+      - ".github/workflows/pipeline.yml"
   pull_request:
     branches: [main]
   workflow_dispatch:
