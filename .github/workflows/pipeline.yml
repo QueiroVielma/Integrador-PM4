@@ -1,5 +1,7 @@
 name: Pipeline PM-04 (Terraform + Ansible)
 
+# Dispara: push na main (mudancas em app, terraform, ansible ou neste arquivo)
+# ou Actions > Run workflow (com parametros). Pull Request so faz build e plan.
 on:
   push:
     branches: [main]
