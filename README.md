@@ -109,7 +109,7 @@ O token do registry de imagens (`GITHUB_TOKEN`) é criado automaticamente pelo G
 
 ### Subir / atualizar (pipeline)
 
-O push na `main` roda tudo sozinho. Também dá para rodar manualmente em **Actions > Pipeline PM-04 > Run workflow**.
+A pipeline roda **manualmente**, em **Actions > Pipeline PM-04 > Run workflow**, escolhendo os parâmetros. O push na `main` só guarda o código: não cria nem altera nada na AWS.
 
 1. **Construir imagens**: `docker build` da API e do frontend, publicadas em `ghcr.io/<usuario>/todo-*:<sha do commit>`.
 2. **Provisionar (Terraform)**: fmt, validate, plan e apply. Na primeira vez leva uns 10 min por causa do NAT e do ALB.
@@ -125,7 +125,7 @@ O push na `main` roda tudo sozinho. Também dá para rodar manualmente em **Acti
 | `atualizar_so` | aplica `apt dist-upgrade` e reinicia a VM se precisar. Desligado, o Ansible só mostra quantas atualizações estão pendentes |
 | `pacotes_extras` | pacotes do apt para instalar além dos padrão (`ca-certificates curl dnsutils net-tools jq htop unzip`) |
 
-No push os parâmetros ficam vazios: valem os tamanhos do `terraform.tfvars` e o SO não é atualizado. Para mudar o tamanho de vez, edite o `terraform.tfvars`; se mudar só pela execução manual, o próximo push volta ao valor do arquivo.
+Os valores padrão dos parâmetros são iguais aos do `terraform.tfvars`. Se uma execução mudar o tamanho de uma VM e a próxima rodar com o padrão, a VM volta ao tamanho do arquivo. Para mudar de vez, edite o `terraform.tfvars`.
 
 O Ansible mostra a versão que está rodando e a versão pedida antes de atualizar e, no fim, confere se os containers estão rodando a versão pedida.
 
@@ -190,7 +190,7 @@ Evidências:
 - Resumo do plan com `0 to add, 1 to change, 0 to destroy`: a VM muda de tamanho sem ser recriada.
 - Log do Ansible: "Instalar pacotes..." como `changed`, e a quantidade de atualizações pendentes do SO.
 - Tarefas criadas antes da mudança continuam na lista.
-- Opcional, atualização de imagem: mudar um texto no `App.js` e fazer push. O log mostra "Rodando: ...:sha_antigo | Pedida: ...:sha_novo | vai atualizar".
+- Opcional, atualização de imagem: mudar um texto no `App.js`, fazer push e rodar a pipeline. O log mostra "Rodando: ...:sha_antigo | Pedida: ...:sha_novo | vai atualizar".
 
 ### Cenário 3: reexecução sem alterações
 Rodar de novo com **os mesmos parâmetros do cenário 2**.
@@ -200,7 +200,7 @@ Evidências:
 - PLAY RECAP com `changed=0` nas duas VMs e o log com "nada a atualizar".
 - Se `atualizar_so` estiver ligado e a Ubuntu tiver publicado uma atualização entre uma execução e outra, o upgrade aparece como `changed`. Isso é o comportamento esperado; para a demonstração, deixe `atualizar_so` desligado nos cenários 2 e 3.
 
-> Se rodar com parâmetros diferentes (ou fizer push), o tamanho volta ao do `terraform.tfvars`, e isso é uma alteração.
+> Se rodar com parâmetros diferentes dos usados no cenário 2, o Terraform mostra essa diferença como alteração.
 
 ### Validação da demanda
 A tabela de requisitos no início deste README liga cada requisito do escopo à parte da infraestrutura que o atende.
